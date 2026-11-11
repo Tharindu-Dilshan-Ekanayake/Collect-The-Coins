@@ -553,17 +553,19 @@ const _hand = new Matrix4()
 const _handPos = new Vector3()
 
 /**
- * Puts `target` on the right hand: at the end of the forearm, turned by however far the
- * arm has rotated from its rest pose. `target` must share the avatar's parent (identity
- * avatar group), so what's inside it is authored as if held with the arm hanging at rest.
- * Runs per frame after the pose; allocates nothing. False if the rig has no such bone.
+ * Puts `target` on a bone (default: the right hand, at the end of the forearm), turned by
+ * however far the bone has rotated from its rest pose. `target` must share the avatar's
+ * parent (identity avatar group), so what's inside it is authored in the avatar's rest
+ * pose (arm hanging down), in metres, relative to the bone. Runs per frame after the
+ * pose; allocates nothing. `fresh`: matrices were already updated this frame.
+ * False if the rig has no such bone.
  */
-export function followHand(rig, target, boneName = 'ArmR2_leaf') {
+export function followBone(rig, target, boneName = 'ArmR2_leaf', fresh = false) {
   const bone = rig?.bonesByName?.[boneName]
   const restInverse = rig?.restInverse?.[boneName]
   const parent = target?.parent
   if (!bone || !restInverse || !parent) return false
-  parent.updateMatrixWorld(true)
+  if (!fresh) parent.updateMatrixWorld(true)
   _hand.copy(parent.matrixWorld).invert().multiply(bone.matrixWorld)
   _handPos.setFromMatrixPosition(_hand)
   _hand.multiply(restInverse).decompose(_fp, _fq, _fs)

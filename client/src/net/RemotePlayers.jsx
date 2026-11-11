@@ -26,8 +26,9 @@ const TAGS = { low: 3, medium: 6, high: 10 }
  * further away stays a cheap instanced body in their own colours.
  */
 const AVATARS = { low: 6, medium: 6, high: 6 }
-/** Where a right hand hangs, until the real avatar has loaded and followHand takes over. */
+/** Where a right hand hangs / the upper back is, until the real avatar has loaded. */
 const HAND_REST = [-0.5, 0.85, 0.05]
+const BACK_REST = [0, 1.15, 0]
 const AVATAR_RANGE = 160
 const AVATAR_KEEP_RANK = 2
 
@@ -68,7 +69,7 @@ function buildParts() {
  * here every frame. All bodies are four InstancedMeshes, so 30 players cost four
  * draw calls; only the nearest few get a name tag (one sprite each).
  */
-function RemotePlayers({ room, max, handItem }) {
+function RemotePlayers({ room, max, handItem, backItem }) {
   const preset = useQuality((s) => s.settings.name)
   const shadows = useQuality((s) => s.settings.shadows)
   const texSize = useQuality((s) => s.settings.texSize)
@@ -133,8 +134,9 @@ function RemotePlayers({ room, max, handItem }) {
     })
     return () => off?.()
   }, [room, grabAt])
-  /** Per avatar slot: the group on the right hand that holds their tool (followHand). */
+  /** Per avatar slot: groups on the right hand and the upper back for their tool (followBone). */
   const hands = useMemo(() => Array.from({ length: avatarCount }, () => ({ current: null })), [avatarCount])
+  const backs = useMemo(() => Array.from({ length: avatarCount }, () => ({ current: null })), [avatarCount])
   /** Instance slots drawn by a real avatar this frame (their blocky body is hidden). */
   const covered = useMemo(() => new Uint8Array(max), [max])
 
@@ -403,6 +405,7 @@ function RemotePlayers({ room, max, handItem }) {
                   targetHeight={1.8}
                   motionRef={{ current: motions[j] }}
                   handRef={a.tool ? hands[j] : undefined}
+                  backRef={a.tool && backItem ? backs[j] : undefined}
                   onReady={() => {
                     avatarReady.current[j] = true
                   }}
@@ -412,6 +415,9 @@ function RemotePlayers({ room, max, handItem }) {
           )}
           <group ref={hands[j]} position={HAND_REST}>
             {a?.tool && handItem?.(a.tool)}
+          </group>
+          <group ref={backs[j]} position={BACK_REST}>
+            {a?.tool && backItem?.(a.tool, hands[j])}
           </group>
         </group>
       ))}
@@ -468,12 +474,12 @@ function useMoveSender(room, bodyRef) {
  * Multiplayer presence for a scene: sends our moves and draws everyone else.
  * Renders nothing offline.
  */
-export function Multiplayer({ kind, bodyRef, handItem }) {
+export function Multiplayer({ kind, bodyRef, handItem, backItem }) {
   useNet((s) => s.roomVersion)
   const room = kind === 'lobby' ? getLobby() : getStage()
   useMoveSender(room, bodyRef)
   if (!room) return null
-  return <RemotePlayers key={`${room.roomId}:${room.sessionId}`} room={room} handItem={handItem} max={(kind === 'lobby' ? LOBBY_CAPACITY : MAX_PARTY) - 1} />
+  return <RemotePlayers key={`${room.roomId}:${room.sessionId}`} room={room} handItem={handItem} backItem={backItem} max={(kind === 'lobby' ? LOBBY_CAPACITY : MAX_PARTY) - 1} />
 }
 
 export default Multiplayer

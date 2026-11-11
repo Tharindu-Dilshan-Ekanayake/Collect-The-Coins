@@ -90,7 +90,8 @@ function rake(metal, matte) {
   }
 }
 
-function vac(metal, matte) {
+/** The Whirl-Vac's enamel tank with its bands, carry handle, gauge and foot. */
+function vacTank(metal, matte) {
   // Rounded enamel tank.
   matte.add(
     lathe([
@@ -114,6 +115,12 @@ function vac(metal, matte) {
   // Pressure gauge.
   metal.add(new CylinderGeometry(0.075, 0.075, 0.04, 24), '#e2b04a', { p: [0, 0.55, 0.27], r: [Math.PI / 2, 0, 0] })
   matte.add(new CylinderGeometry(0.06, 0.06, 0.045, 24), '#f6f1e3', { p: [0, 0.55, 0.275], r: [Math.PI / 2, 0, 0] })
+  matte.add(new CylinderGeometry(0.2, 0.22, 0.12, 32), '#2e2b38', { p: [0, 0.06, 0] })
+}
+
+/** On the shelf: the tank with its hose and nozzle. */
+function vac(metal, matte) {
+  vacTank(metal, matte)
   // Hose and flared nozzle.
   const hose = new CatmullRomCurve3([
     new Vector3(0.22, 0.25, 0.1),
@@ -132,7 +139,49 @@ function vac(metal, matte) {
     '#c9ccd6',
     { p: [0.52, 0.55, 0.36], r: [-0.3, 0, -0.2] },
   )
-  matte.add(new CylinderGeometry(0.2, 0.22, 0.12, 32), '#2e2b38', { p: [0, 0.06, 0] })
+}
+
+/** Worn on a player's back: the tank and a hose outlet low on one side (+X). */
+function vacPack(metal, matte) {
+  vacTank(metal, matte)
+  metal.add(new CylinderGeometry(0.06, 0.07, 0.1, 20), '#e2b04a', { p: [0.28, 0.2, 0], r: [0, 0, Math.PI / 2] })
+}
+
+/**
+ * Leather shoulder straps with gold buckles, in metres around a player's upper back
+ * (Spine2): over each shoulder from behind and down the chest. Fitted to the Boxity
+ * avatar (torso 0.79 wide, 0.46 deep, shoulder top 0.17 above Spine2).
+ */
+function vacStraps(metal, matte) {
+  const leather = '#6b3a1e'
+  for (const x of [-0.26, 0.26]) {
+    matte.add(new RoundedBoxGeometry(0.09, 0.04, 0.5, 2, 0.015), leather, { p: [x, 0.19, 0.004] })
+    matte.add(new RoundedBoxGeometry(0.09, 0.34, 0.04, 2, 0.015), leather, { p: [x, 0.02, 0.252] })
+    matte.add(new RoundedBoxGeometry(0.09, 0.22, 0.04, 2, 0.015), leather, { p: [x, 0.08, -0.245] })
+    metal.add(new RoundedBoxGeometry(0.11, 0.055, 0.025, 2, 0.008), '#e2b04a', { p: [x, -0.06, 0.272] })
+  }
+}
+
+/**
+ * The Whirl-Vac's nozzle wand, held while the tank rides on your back: a grip at the top
+ * (hose cuff above it), a steel tube and a wide flat nozzle with a glowing mouth. The
+ * head is tilted back so the mouth faces the floor when the wand is held out in front.
+ */
+function vacWand(metal, matte) {
+  metal.add(new CylinderGeometry(0.045, 0.052, 0.08, 18), '#c9ccd6', { p: [0, 1.06, 0] })
+  matte.add(new CylinderGeometry(0.052, 0.052, 0.24, 20), '#2e2b38', { p: [0, 0.9, 0] })
+  for (const y of [0.78, 1.02]) {
+    metal.add(new TorusGeometry(0.053, 0.013, 8, 24), '#e2b04a', { p: [0, y, 0], r: [Math.PI / 2, 0, 0] })
+  }
+  metal.add(new CylinderGeometry(0.03, 0.03, 0.6, 16), '#c9ccd6', { p: [0, 0.48, 0] })
+  matte.group({ p: [0, 0.18, 0], r: [1.0, 0, 0] }, (g) => {
+    g.add(new CylinderGeometry(0.035, 0.085, 0.14, 18), '#3f9fb8', { p: [0, -0.02, 0] })
+    g.add(new RoundedBoxGeometry(0.46, 0.09, 0.2, 3, 0.03), '#2e2b38', { p: [0, -0.12, 0] })
+  })
+  metal.group({ p: [0, 0.18, 0], r: [1.0, 0, 0] }, (g) => {
+    g.add(new RoundedBoxGeometry(0.47, 0.025, 0.21, 2, 0.01), '#e2b04a', { p: [0, -0.075, 0] })
+    g.add(new RoundedBoxGeometry(0.4, 0.02, 0.14, 2, 0.008), '#7fe9ff', { p: [0, -0.168, 0] })
+  })
 }
 
 function lodestone(metal, matte) {
@@ -165,7 +214,13 @@ function lodestone(metal, matte) {
   }
 }
 
-const BUILDERS = { hands: glove, scoop, rake, vac, lodestone }
+/** One straight hose segment, 1 m long along +Y and centred: stretched between two points. */
+function hose(metal, matte) {
+  matte.add(new CylinderGeometry(0.042, 0.042, 1, 12, 1), '#2f7f93', {})
+  metal.add(new TorusGeometry(0.035, 0.009, 6, 16), '#e2b04a', { r: [Math.PI / 2, 0, 0] })
+}
+
+const BUILDERS = { hands: glove, scoop, rake, vac, lodestone, vacPack, vacStraps, vacWand, hose }
 
 /** { metal, matte } geometries for one tool. */
 export function buildTool(id) {

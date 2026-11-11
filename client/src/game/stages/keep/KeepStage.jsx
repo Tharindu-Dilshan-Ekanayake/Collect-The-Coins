@@ -7,6 +7,7 @@ import {
   CylinderGeometry,
   Color,
   EquirectangularReflectionMapping,
+  Euler,
   DoubleSide,
   InstancedBufferAttribute,
   MeshBasicMaterial,
@@ -83,7 +84,8 @@ const HOLDS = {
   // The bowl's open side faces you, so you see the coins in it.
   scoop: { grip: [0, 0.98, 0], rot: [1.75, 0.25, 0.3], scale: 0.7, spin: Math.PI },
   rake: { grip: [0, 1.05, 0], rot: [1.8, 0.25, 0.3], scale: 0.6, spin: 0 },
-  vac: { grip: [0.1, 0.25, 0], rot: [0.15, -0.75, 0.05], scale: 0.34, spin: 0 },
+  // The vac's tank rides on your back; you hold its nozzle wand like the scoop.
+  vac: { grip: [0, 0.9, 0], rot: [1.75, 0.25, 0.3], scale: 0.62, spin: Math.PI },
   lodestone: { grip: [0, 0.25, 0], rot: [-0.1, 0.5, 0], scale: 0.34, spin: 0 },
 }
 
@@ -391,20 +393,99 @@ function ToolDisplay({ tools, materials }) {
  * arm (followHand in avatarRig), so this is authored as if the arm hung straight down:
  * the grip in the fist and long tools tipped a little forward past the forearm, so in the
  * carry pose (hand in front of the hip, elbow bent ~50 degrees) they point forward and
- * down at the coins. The vac hangs from its top handle; the lodestone sits on the palm.
+ * down at the coins. The vac's wand is held the same way (its tank is worn on the back,
+ * see BACK); the lodestone sits on the palm.
  * `grip` overrides the first-person grip point (model space) where it differs.
  */
 const CARRY = {
   scoop: { pos: [0, 0.06, 0], rot: [-0.25, 0, 0], scale: 0.8, spin: 0 },
   rake: { pos: [0, 0.06, 0], rot: [-0.25, 0, 0], scale: 0.75, spin: 0 },
-  vac: { pos: [0, 0.02, 0], rot: [0.9, 1.2, 0], scale: 0.5, spin: 0, grip: [0, 0.98, 0] },
+  vac: { pos: [0, 0.06, 0], rot: [-0.25, 0, 0], scale: 0.8, spin: 0 },
   lodestone: { pos: [0, 0.05, 0.06], rot: [0.9, 0, 0], scale: 0.5, spin: 0, grip: [0, 0.12, 0] },
+}
+
+/** Tools whose hand part is a different model, because the rest is worn on the back. */
+const IN_HAND = { vac: 'vacWand' }
+
+/**
+ * Tools worn on another player's back, authored like CARRY but relative to their upper
+ * back (Spine2, 0.17 m below the shoulder top): the Whirl-Vac's tank sits just behind the
+ * torso (its back face is 0.225 m behind the spine), gauge facing out, hose outlet on
+ * their right, from the waist up to shoulder height.
+ */
+const BACK = {
+  vac: { pos: [0, -0.47, -0.385], rot: [0, Math.PI, 0], scale: [0.85, 0.65, 0.68] },
+}
+
+/** A point in a tool model's space, placed by a CARRY/BACK entry (spin 0, grip offset). */
+function placed(entry, point, grip = [0, 0, 0]) {
+  const s = Array.isArray(entry.scale) ? entry.scale : [entry.scale, entry.scale, entry.scale]
+  return new Vector3((point[0] - grip[0]) * s[0], (point[1] - grip[1]) * s[1], (point[2] - grip[2]) * s[2])
+    .applyEuler(new Euler(...entry.rot))
+    .add(new Vector3(...entry.pos))
+}
+/** Hose ends: the tank's outlet (back space) and the top of the wand (hand space). */
+const HOSE_OUTLET = placed(BACK.vac, [0.33, 0.2, 0])
+const HOSE_WAND = placed(CARRY.vac, [0, 1.1, 0], HOLDS.vac.grip)
+
+const _hoseA = new Vector3()
+const _hoseMid = new Vector3()
+const _hoseDir = new Vector3()
+const _hoseQ = new Quaternion()
+const _up = new Vector3(0, 1, 0)
+
+/** Stretches a 1 m hose segment (centred, along +Y) from a to b. */
+function stretch(mesh, a, b) {
+  _hoseDir.subVectors(b, a)
+  const len = Math.max(_hoseDir.length(), 1e-4)
+  mesh.position.addVectors(a, b).multiplyScalar(0.5)
+  mesh.quaternion.setFromUnitVectors(_up, _hoseDir.multiplyScalar(1 / len))
+  mesh.scale.set(1, len, 1)
+}
+
+/**
+ * The Whirl-Vac's tank on another player's back, and the hose from it to the wand in
+ * their hand (two segments sagging out to the side). Hand and back groups are siblings
+ * in the avatar group, so the hose is worked out in that space every frame.
+ */
+function RemoteBackpack({ toolId, hand, tools, materials }) {
+  const root = useRef(null)
+  const near = useRef(null)
+  const far = useRef(null)
+  useFrame(() => {
+    const back = root.current?.parent
+    const h = hand?.current
+    if (!back || !h || !near.current || !far.current) return
+    // Wand top: hand space -> avatar space -> back space.
+    _hoseA.copy(HOSE_WAND).applyQuaternion(h.quaternion).add(h.position).sub(back.position)
+    _hoseA.applyQuaternion(_hoseQ.copy(back.quaternion).invert())
+    // The hose droops beside the hip, outside the leg, between the tank and the wand.
+    _hoseMid.addVectors(HOSE_OUTLET, _hoseA).multiplyScalar(0.5)
+    _hoseMid.x = Math.min(HOSE_OUTLET.x, _hoseA.x) - 0.08
+    _hoseMid.y = Math.min(HOSE_OUTLET.y, _hoseA.y) - 0.18
+    stretch(near.current, HOSE_OUTLET, _hoseMid)
+    stretch(far.current, _hoseMid, _hoseA)
+  })
+  const wear = BACK[toolId]
+  if (!wear) return null
+  return (
+    <group ref={root}>
+      <group position={wear.pos} rotation={wear.rot} scale={wear.scale}>
+        <mesh geometry={tools.vacPack.metal} material={materials.metal} />
+        <mesh geometry={tools.vacPack.matte} material={materials.matte} />
+      </group>
+      <mesh geometry={tools.vacStraps.matte} material={materials.matte} />
+      <mesh geometry={tools.vacStraps.metal} material={materials.metal} />
+      <mesh ref={near} geometry={tools.hose.matte} material={materials.matte} />
+      <mesh ref={far} geometry={tools.hose.matte} material={materials.matte} />
+    </group>
+  )
 }
 
 /** The tool another player has equipped, drawn in their hand. Bare hands show nothing. */
 function RemoteTool({ toolId, tools, materials }) {
   const carry = CARRY[toolId]
-  const tool = tools[toolId]
+  const tool = tools[IN_HAND[toolId] || toolId]
   if (!carry || !tool) return null
   const grip = carry.grip || HOLDS[toolId].grip
   return (
@@ -450,7 +531,7 @@ function HeldTool({ tools, materials }) {
     g.quaternion.multiply(_q)
   })
 
-  const tool = tools[equipped] || tools.hands
+  const tool = tools[IN_HAND[equipped] || equipped] || tools.hands
   const hold = HOLDS[equipped] || HOLDS.hands
   return (
     <group ref={ref}>
@@ -522,7 +603,17 @@ export default function KeepStage() {
     }),
     [reflective],
   )
-  const tools = useDisposable(() => Object.fromEntries(TOOLS.map((t) => [t.id, buildTool(t.id)])), [])
+  const tools = useDisposable(
+    () => ({
+      ...Object.fromEntries(TOOLS.map((t) => [t.id, buildTool(t.id)])),
+      // The Whirl-Vac as worn: tank on the back, wand in the hand, hose between them.
+      vacPack: buildTool('vacPack'),
+      vacStraps: buildTool('vacStraps'),
+      vacWand: buildTool('vacWand'),
+      hose: buildTool('hose'),
+    }),
+    [],
+  )
   const coin = useDisposable(() => buildFieldCoin(reflective ? 12 : 6), [reflective])
   // Round coin faces come from a small texture cut out with alphaTest.
   const coinMaterial = useDisposable(() => {
@@ -632,6 +723,9 @@ export default function KeepStage() {
         kind="stage"
         bodyRef={bodyRef}
         handItem={(toolId) => <RemoteTool key={toolId} toolId={toolId} tools={tools} materials={toolMaterials} />}
+        backItem={(toolId, hand) =>
+          BACK[toolId] ? <RemoteBackpack key={toolId} toolId={toolId} hand={hand} tools={tools} materials={toolMaterials} /> : null
+        }
       />
 
       <Player bodyRef={bodyRef} position={SPAWN} world={WORLD} firstPerson />

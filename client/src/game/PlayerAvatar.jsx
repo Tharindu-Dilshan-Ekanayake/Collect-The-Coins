@@ -31,7 +31,7 @@ import {
   captureRestPose,
   collectRig,
   followAccessories,
-  followHand,
+  followBone,
 } from './avatarRig'
 
 /** Emotes stop when the player moves faster than this (world units / s). */
@@ -149,7 +149,7 @@ function loadAccessory(urls) {
  *   rescaled rather than trusted at native size.
  */
 export const PlayerAvatar = forwardRef(function PlayerAvatar(
-  { onReady, targetHeight = 1.8, motionRef, handRef, equipped: equippedProp, remote = false, ...props },
+  { onReady, targetHeight = 1.8, motionRef, handRef, backRef, equipped: equippedProp, remote = false, ...props },
   ref,
 ) {
   const bloxity = useBloxity()
@@ -388,8 +388,9 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
       }
 
       followAccessories(followersRef.current, holderRef.current, fitRef.current)
-      // Something held in the right hand (another player's tool) follows the hand bone.
-      if (handRef?.current) followHand(rig, handRef.current)
+      // Another player's tool: held in the right hand, and (a vac tank) worn on the back.
+      const held = handRef?.current ? followBone(rig, handRef.current, 'ArmR2_leaf') : false
+      if (backRef?.current) followBone(rig, backRef.current, 'Spine2', held)
     } catch {
       // A malformed payload must not kill the render loop.
     }
