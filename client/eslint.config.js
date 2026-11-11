@@ -18,4 +18,12 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // R3F scene code mutates three.js / Rapier objects (uniforms, rays, cameras) inside
+    // useFrame on purpose: that is how it animates without React re-renders. This
+    // React Compiler rule assumes hook values are immutable, and the compiler is not
+    // enabled in this project.
+    files: ['src/game/**/*.{js,jsx}', 'src/net/**/*.{js,jsx}'],
+    rules: { 'react-hooks/immutability': 'off' },
+  },
 ])

@@ -2,95 +2,121 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { Vector3 } from 'three'
 
-/** How high above the player's origin the camera aims. */
-const LOOK_HEIGHT = 1.4
+import { input } from '../state/input'
+import { registerDebug } from './lib/debug'
+import { LOBBY_WORLD } from './lobby/collision'
 
-const MIN_DISTANCE = 3
-const MAX_DISTANCE = 20
-const START_DISTANCE = 8
+/** How high above the player's origin the camera aims. */
+const LOOK_HEIGHT = 1.3
+
+const MIN_DISTANCE = 3.5
+const MAX_DISTANCE = 18
+const START_DISTANCE = 9
 
 // Pitch limits, in radians. Stops the camera flipping over the top or sinking
-// under the track.
-const MIN_PITCH = -0.15
-const MAX_PITCH = 1.25
-const START_PITCH = 0.32
+// under the ground.
+const MIN_PITCH = -0.1
+const MAX_PITCH = 1.2
+const START_PITCH = 0.3
 
 const DRAG_SENSITIVITY = 0.005
+const TOUCH_SENSITIVITY = 0.007
 const ZOOM_SENSITIVITY = 0.01
+const PINCH_SENSITIVITY = 0.04
 
 // Higher = snappier. Framerate-independent via the pow() smoothing below.
-const POSITION_SMOOTHING = 4
-const LOOK_SMOOTHING = 8
+const POSITION_SMOOTHING = 5
+const LOOK_SMOOTHING = 9
+
+/** Samples along the camera boom when checking for obstacles. */
+const BOOM_SAMPLES = 14
+const MIN_BOOM = 0.8
+
+/** Mouse buttons that orbit the camera. Stages free the left button for grabbing. */
+const DEFAULT_DRAG_BUTTONS = [0, 2]
 
 const _desired = new Vector3()
 const _target = new Vector3()
+const _dir = new Vector3()
+const _origin = new Vector3()
 
 /**
- * Third-person orbit camera.
+ * Third-person orbit camera that trails the player's rigid body.
  *
- * Trails the player's rigid body, easing both position and look-at target.
- * Right-click drag orbits, the mouse wheel zooms.
+ * The boom from the player to the camera is sampled against the lobby colliders, so
+ * the camera pulls in front of stalls, boards and the fountain instead of clipping
+ * through them.
  *
- * Reads the Rapier body directly rather than React state - the body is the
- * authoritative transform and updates every physics step, not every render.
+ * Mouse: left or right drag orbits, wheel zooms.
+ * Touch: one finger on the 3D view orbits, two fingers pinch-zoom. (The joystick
+ * and buttons are HTML on top of the canvas, so their touches never reach here.)
  *
  * @param {{ bodyRef: React.MutableRefObject<any> }} props
  */
-export function FollowCamera({ bodyRef }) {
+export function FollowCamera({ bodyRef, world = LOBBY_WORLD, dragButtons = DEFAULT_DRAG_BUTTONS, initialYaw = 0 }) {
   const camera = useThree((s) => s.camera)
   const gl = useThree((s) => s.gl)
 
-  // Spherical offset from the player. A ref, not state: pointer events write to it
-  // every mousemove and the frame loop reads it - re-rendering would be wasteful.
-  const orbit = useRef({ yaw: 0, pitch: START_PITCH, distance: START_DISTANCE })
+  // Spherical offset from the player. A ref, not state: pointer events write to it.
+  const orbit = useRef({ yaw: initialYaw, pitch: START_PITCH, distance: START_DISTANCE })
   const lookAt = useRef(new Vector3())
   const initialised = useRef(false)
 
+  useEffect(() => registerDebug('orbit', orbit), [])
+
   useEffect(() => {
     const el = gl.domElement
-    if (!el) return
+    if (!el) return undefined
 
-    let dragging = false
-    let lastX = 0
-    let lastY = 0
+    /** pointerId -> { x, y } for every finger / button currently dragging. */
+    const pointers = new Map()
+    let pinchDistance = 0
+
+    const pinchSpan = () => {
+      const [a, b] = [...pointers.values()]
+      return Math.hypot(a.x - b.x, a.y - b.y)
+    }
 
     const onPointerDown = (e) => {
-      if (e.button !== 2) return // right button only
-      dragging = true
-      lastX = e.clientX
-      lastY = e.clientY
+      if (e.pointerType === 'mouse' && !dragButtons.includes(e.button)) return
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
       el.setPointerCapture?.(e.pointerId)
+      if (pointers.size === 2) pinchDistance = pinchSpan()
     }
 
     const onPointerMove = (e) => {
-      if (!dragging) return
-      const dx = e.clientX - lastX
-      const dy = e.clientY - lastY
-      lastX = e.clientX
-      lastY = e.clientY
-
+      const last = pointers.get(e.pointerId)
+      if (!last) return
       const o = orbit.current
-      o.yaw -= dx * DRAG_SENSITIVITY
-      o.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, o.pitch + dy * DRAG_SENSITIVITY))
+
+      if (pointers.size >= 2) {
+        last.x = e.clientX
+        last.y = e.clientY
+        const span = pinchSpan()
+        o.distance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, o.distance - (span - pinchDistance) * PINCH_SENSITIVITY))
+        pinchDistance = span
+        return
+      }
+
+      const sensitivity = (e.pointerType === 'touch' ? TOUCH_SENSITIVITY : DRAG_SENSITIVITY) * input.lookScale
+      o.yaw -= (e.clientX - last.x) * sensitivity
+      o.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, o.pitch + (e.clientY - last.y) * sensitivity))
+      last.x = e.clientX
+      last.y = e.clientY
     }
 
     const endDrag = (e) => {
-      if (!dragging) return
-      dragging = false
+      if (!pointers.delete(e.pointerId)) return
       el.releasePointerCapture?.(e.pointerId)
+      if (pointers.size === 2) pinchDistance = pinchSpan()
     }
 
     const onWheel = (e) => {
-      // Without this the page scrolls behind the canvas.
       e.preventDefault()
       const o = orbit.current
-      o.distance = Math.min(
-        MAX_DISTANCE,
-        Math.max(MIN_DISTANCE, o.distance + e.deltaY * ZOOM_SENSITIVITY),
-      )
+      o.distance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, o.distance + e.deltaY * ZOOM_SENSITIVITY))
     }
 
-    // Right-dragging otherwise opens the browser context menu mid-orbit.
     const onContextMenu = (e) => e.preventDefault()
 
     el.addEventListener('pointerdown', onPointerDown)
@@ -98,7 +124,6 @@ export function FollowCamera({ bodyRef }) {
     el.addEventListener('pointerup', endDrag)
     el.addEventListener('pointercancel', endDrag)
     el.addEventListener('contextmenu', onContextMenu)
-    // passive:false is required for preventDefault() on wheel to take effect.
     el.addEventListener('wheel', onWheel, { passive: false })
 
     return () => {
@@ -109,7 +134,7 @@ export function FollowCamera({ bodyRef }) {
       el.removeEventListener('contextmenu', onContextMenu)
       el.removeEventListener('wheel', onWheel)
     }
-  }, [gl])
+  }, [gl, dragButtons])
 
   useFrame((_state, delta) => {
     const body = bodyRef.current
@@ -123,20 +148,35 @@ export function FollowCamera({ bodyRef }) {
     const horizontal = Math.cos(pitch) * distance
     _desired.set(
       _target.x + Math.sin(yaw) * horizontal,
-      _target.y + Math.sin(pitch) * distance + LOOK_HEIGHT,
+      Math.max(0.6, _target.y + Math.sin(pitch) * distance + LOOK_HEIGHT),
       _target.z + Math.cos(yaw) * horizontal,
     )
 
+    // Camera collision: shorten the boom if something solid is in the way.
+    _origin.set(_target.x, _target.y + LOOK_HEIGHT, _target.z)
+    _dir.subVectors(_desired, _origin)
+    const boom = _dir.length()
+    _dir.divideScalar(boom)
+    let blocked = false
+    for (let i = 1; i <= BOOM_SAMPLES; i += 1) {
+      const t = (i / BOOM_SAMPLES) * boom
+      if (world.isBlocked(_origin.x + _dir.x * t, _origin.y + _dir.y * t, _origin.z + _dir.z * t)) {
+        const d = Math.max(MIN_BOOM, t - boom / BOOM_SAMPLES)
+        _desired.copy(_origin).addScaledVector(_dir, d)
+        blocked = true
+        break
+      }
+    }
+
     if (!initialised.current) {
-      // Avoid a long swoop in from wherever the default camera started.
       camera.position.copy(_desired)
       lookAt.current.copy(_target).setY(_target.y + LOOK_HEIGHT)
       initialised.current = true
     }
 
-    // 1 - pow(x, delta) keeps the easing rate consistent across framerates.
-    camera.position.lerp(_desired, 1 - Math.pow(0.001, delta * (POSITION_SMOOTHING / 10)))
-
+    // Snap in fast when blocked so the wall is never seen from the inside.
+    const smoothing = blocked ? POSITION_SMOOTHING * 4 : POSITION_SMOOTHING
+    camera.position.lerp(_desired, 1 - Math.pow(0.001, delta * (smoothing / 10)))
     _target.y += LOOK_HEIGHT
     lookAt.current.lerp(_target, 1 - Math.pow(0.001, delta * (LOOK_SMOOTHING / 10)))
     camera.lookAt(lookAt.current)

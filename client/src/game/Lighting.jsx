@@ -2,72 +2,75 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useLayoutEffect, useRef } from 'react'
 import { Vector3 } from 'three'
 
+import { useQuality } from '../state/quality'
 import { LIGHTS } from './sceneStyle'
 
-const SUN_DIRECTION = new Vector3(...LIGHTS.sunDirection).normalize()
-/** How far back along SUN_DIRECTION the light sits from the point it shadows. */
-const SUN_DISTANCE = 60
+const KEY_DIRECTION = new Vector3(...LIGHTS.keyDirection).normalize()
+const FILL_POSITION = new Vector3(...LIGHTS.fillDirection).normalize().multiplyScalar(50).toArray()
+/** How far back along KEY_DIRECTION the light sits from the point it shadows. */
+const KEY_DISTANCE = 50
 /** Half-size of the square area around the player that receives shadows. */
-const SHADOW_EXTENT = 24
+const SHADOW_EXTENT = 22
+const KEY_START = KEY_DIRECTION.clone().multiplyScalar(KEY_DISTANCE).toArray()
 
 /**
- * Bright, even daylight: a white hemisphere fill and a warm sun with soft shadows.
+ * Dusk lighting: violet hemisphere fill, a cool key light (the only shadow caster,
+ * and only on MEDIUM/HIGH) and a warm low fill from the far side.
  *
- * A directional light's shadow only covers a fixed box around its target, so the sun
- * and its target are moved with the player every frame. Otherwise shadows would exist
- * only near the world origin and disappear a few steps down the track.
+ * The key light's shadow box follows the player so shadows exist wherever they walk.
  *
  * @param {{ followRef: React.MutableRefObject<any> }} props the player's rigid body
  */
 export function Lighting({ followRef }) {
-  const sunRef = useRef(null)
+  const keyRef = useRef(null)
   const scene = useThree((s) => s.scene)
+  const { shadows, shadowMapSize } = useQuality((s) => s.settings)
 
   useLayoutEffect(() => {
-    const sun = sunRef.current
-    if (!sun) return undefined
-
-    const shadowCamera = sun.shadow.camera
-    shadowCamera.left = -SHADOW_EXTENT
-    shadowCamera.right = SHADOW_EXTENT
-    shadowCamera.top = SHADOW_EXTENT
-    shadowCamera.bottom = -SHADOW_EXTENT
-    shadowCamera.near = 1
-    shadowCamera.far = SUN_DISTANCE * 2
-    shadowCamera.updateProjectionMatrix()
-
+    const key = keyRef.current
+    if (!key) return undefined
+    const cam = key.shadow.camera
+    cam.left = -SHADOW_EXTENT
+    cam.right = SHADOW_EXTENT
+    cam.top = SHADOW_EXTENT
+    cam.bottom = -SHADOW_EXTENT
+    cam.near = 1
+    cam.far = KEY_DISTANCE * 2
+    cam.updateProjectionMatrix()
     // The target has to be in the scene for its matrix to update as it moves.
-    scene.add(sun.target)
+    scene.add(key.target)
     return () => {
-      scene.remove(sun.target)
+      scene.remove(key.target)
     }
-  }, [scene])
+  }, [scene, shadows, shadowMapSize])
 
   useFrame(() => {
-    const sun = sunRef.current
+    const key = keyRef.current
     const body = followRef.current
-    if (!sun || !body) return
-
+    if (!key || !body) return
     const p = body.translation()
-    sun.target.position.set(p.x, 0, p.z)
-    sun.position.copy(sun.target.position).addScaledVector(SUN_DIRECTION, SUN_DISTANCE)
+    key.target.position.set(p.x, 0, p.z)
+    key.position.copy(key.target.position).addScaledVector(KEY_DIRECTION, KEY_DISTANCE)
   })
 
   return (
     <>
       <hemisphereLight args={[LIGHTS.hemiSky, LIGHTS.hemiGround, LIGHTS.hemiIntensity]} />
       <directionalLight
-        ref={sunRef}
-        castShadow
-        color={LIGHTS.sunColor}
-        intensity={LIGHTS.sunIntensity}
-        position={SUN_DIRECTION.clone().multiplyScalar(SUN_DISTANCE).toArray()}
-        shadow-mapSize={[2048, 2048]}
+        // Remount when the map size changes: three can't resize a live shadow map.
+        key={shadows ? shadowMapSize : 'off'}
+        ref={keyRef}
+        castShadow={shadows}
+        color={LIGHTS.keyColor}
+        intensity={LIGHTS.keyIntensity}
+        position={KEY_START}
+        shadow-mapSize={shadows ? [shadowMapSize, shadowMapSize] : [1, 1]}
         shadow-radius={LIGHTS.shadowSoftness}
         shadow-intensity={LIGHTS.shadowIntensity}
-        shadow-bias={-0.0005}
+        shadow-bias={-0.0006}
         shadow-normalBias={0.03}
       />
+      <directionalLight color={LIGHTS.fillColor} intensity={LIGHTS.fillIntensity} position={FILL_POSITION} />
     </>
   )
 }

@@ -1,23 +1,20 @@
 /**
  * URL construction and slot metadata for Bloxity avatar assets.
  *
- * The shapes here are not guesses: they mirror the assembly logic inside
- * legion-sdk.min.js (the same code that renders the avatar preview in the Bloxity
- * portal), so an avatar built with this file matches what the player sees there.
+ * Every URL comes from the told environment (environment.js) or from the SDK's own
+ * helpers, never a hardcoded host. The SDK helpers are preferred when the SDK has
+ * loaded; the local builders mirror them so the avatar still assembles before that.
  *
  * `avatar.getEquipped()` returns:
  *   { hatId, backId, skinId, headId, armLId, armRId, legLId, legRId, torsoId,
  *     hairId, maskId, neckId, chestId, waistId, handId, shoesId,
- *     pantsId, shirtId, faceId }
+ *     pantsId, shirtId, faceId, characterId }
  */
-
-export const AVATAR_CDN = 'https://static.bloxity.io/avatars'
-
-/** Same value BloxityProvider passes to `init()`; the composited skin is served here. */
-const API_URL = import.meta.env.VITE_BLOXITY_API_URL || 'https://api.bloxity.io'
+import { avatarCdn, getEnvironment } from './environment'
+import { getSDK, safeCall } from './sdk'
 
 /** The base humanoid body + skeleton. All other assets modify this. */
-export const BASE_BODY_URL = `${AVATAR_CDN}/player.glb`
+export const baseBodyUrl = () => `${avatarCdn()}/player.glb`
 
 /** Bone that hats attach to, from player.glb's skeleton. */
 export const HAT_BONE = 'Neck1'
@@ -45,6 +42,46 @@ export const PART_SLOTS = {
   torso: { idKey: 'torsoId', mesh: 'default_torso', dir: 'torso', suffix: '' },
 }
 
+/**
+ * Bone-attached slots besides hat and back, as the SDK's getAccessorySlots() returns
+ * them. Used only until the SDK has loaded; afterwards the SDK's list wins, so slots
+ * added later work without a code change.
+ */
+const FALLBACK_ACCESSORY_SLOTS = [
+  { type: 'hair', field: 'hairId', bone: 'Neck1', origin: [0, 5.6, 0], inheritScale: true, dir: 'hats', label: 'Hair' },
+  { type: 'mask', field: 'maskId', bone: 'Neck1', origin: [0, 5.6, 0], inheritScale: true, dir: 'hats', label: 'Mask' },
+  { type: 'neck', field: 'neckId', bone: 'Spine2', origin: [0, 4.8, 0], inheritScale: true, dir: 'neck', label: 'Neck' },
+  { type: 'chest', field: 'chestId', bone: 'Spine2', origin: [0, 3.6, 0], inheritScale: true, dir: 'chest', label: 'Chest' },
+  { type: 'waist', field: 'waistId', bone: 'Spine1', origin: [0, 2.4, 0], inheritScale: true, dir: 'waist', label: 'Waist' },
+  {
+    type: 'hand',
+    field: 'handId',
+    bone: 'ArmL2_leaf',
+    mirrorBone: 'ArmR2_leaf',
+    origin: [0, 0, 0],
+    inheritScale: false,
+    dir: 'hand',
+    label: 'Hand',
+  },
+  {
+    type: 'shoes',
+    field: 'shoesId',
+    bone: 'LegL2_leaf',
+    mirrorBone: 'LegR2_leaf',
+    origin: [0, 0, 0],
+    inheritScale: false,
+    dir: 'shoes',
+    label: 'Shoes',
+  },
+]
+
+/** Every bone-attached slot besides hat and back (hair, mask, neck, chest, waist, hand, shoes, …). */
+export function accessorySlots() {
+  const avatar = getSDK()?.avatar
+  const slots = avatar?.getAccessorySlots && safeCall(avatar.getAccessorySlots.bind(avatar))
+  return Array.isArray(slots) && slots.length ? slots : FALLBACK_ACCESSORY_SLOTS
+}
+
 /** Values that all mean "nothing equipped". Superset of the SDK's own check. */
 const EMPTY_IDS = new Set(['-1', '', 'undefined', 'null'])
 
@@ -60,13 +97,29 @@ export function isRealId(id) {
 export const assetUrls = {
   part: (slot, id) => {
     const { dir, suffix } = PART_SLOTS[slot]
-    return `${AVATAR_CDN}/parts/${dir}/${id}${suffix}.glb`
+    return `${avatarCdn()}/parts/${dir}/${id}${suffix}.glb`
   },
-  skinTexture: (id) => `${AVATAR_CDN}/skins/${id}.png`,
-  hatMesh: (id) => `${AVATAR_CDN}/items/hats/${id}.obj`,
-  hatTexture: (id) => `${AVATAR_CDN}/textures/hats/${id}.png`,
-  backMesh: (id) => `${AVATAR_CDN}/items/back/${id}.obj`,
-  backTexture: (id) => `${AVATAR_CDN}/textures/back/${id}.png`,
+  skinTexture: (id) => `${avatarCdn()}/skins/${id}.png`,
+  hatMesh: (id) => `${avatarCdn()}/items/hats/${id}.obj`,
+  hatTexture: (id) => `${avatarCdn()}/textures/hats/${id}.png`,
+  backMesh: (id) => `${avatarCdn()}/items/back/${id}.obj`,
+  backTexture: (id) => `${avatarCdn()}/textures/back/${id}.png`,
+}
+
+/**
+ * { mesh, texture } for a worn accessory (hatId, backId or any accessory slot field),
+ * or null when nothing real is worn there.
+ */
+export function accessoryUrls(field, id, slot = null) {
+  if (!isRealId(id) || String(id) === '0') return null
+  const avatar = getSDK()?.avatar
+  if (avatar?.getAccessoryUrls) {
+    const urls = safeCall(avatar.getAccessoryUrls.bind(avatar), field, String(id))
+    if (urls !== undefined) return urls || null
+  }
+  const dir = field === 'hatId' ? 'hats' : field === 'backId' ? 'back' : slot?.dir
+  if (!dir || !/^[A-Za-z0-9_-]+$/.test(String(id))) return null
+  return { mesh: `${avatarCdn()}/items/${dir}/${id}.obj`, texture: `${avatarCdn()}/textures/${dir}/${id}.png` }
 }
 
 /** Skin ids fall back to "0" rather than being skipped. */
@@ -85,10 +138,7 @@ const SKIN_OVERLAYS = [
 /**
  * URL of the skin with the worn pants, shirt and face drawn on, or null when none are
  * worn (then the plain `assetUrls.skinTexture` is the right texture).
- *
- * Mirrors the SDK's `avatar.getSkinTextureUrl()`, but built from the equipped payload
- * this component is rendering rather than the SDK's current user, so it can't lag a
- * live outfit change.
+ * Fallback for before the SDK loads; see skinTextureUrl().
  */
 export function skinCompositeUrl(equipped) {
   // As in the SDK, '0' also means "no overlay" here.
@@ -98,5 +148,16 @@ export function skinCompositeUrl(equipped) {
 
   let key = `s${skinIdOrDefault(equipped.skinId)}`
   for (const [field, prefix] of layers) key += `_${prefix}${equipped[field]}`
-  return `${API_URL}/v1/avatar/skin-texture/${key}.png`
+  return `${getEnvironment().apiUrl}/v1/avatar/skin-texture/${key}.png`
+}
+
+/**
+ * The body texture for these equipped ids, with pants, shirt and face drawn on:
+ * the SDK's getSkinTextureUrlFor() when available, else the same URL built locally.
+ */
+export function skinTextureUrl(equipped) {
+  const avatar = getSDK()?.avatar
+  const url = avatar?.getSkinTextureUrlFor && safeCall(avatar.getSkinTextureUrlFor.bind(avatar), equipped || {})
+  if (typeof url === 'string' && url) return url
+  return skinCompositeUrl(equipped) || assetUrls.skinTexture(skinIdOrDefault(equipped?.skinId))
 }

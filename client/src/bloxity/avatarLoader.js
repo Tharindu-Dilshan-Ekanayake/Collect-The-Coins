@@ -1,4 +1,4 @@
-import { TextureLoader } from 'three'
+import { NearestFilter, SRGBColorSpace, TextureLoader } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 
@@ -57,10 +57,36 @@ export function loadOBJ(url) {
   )
 }
 
+/**
+ * Loads a player's own uploaded character GLB (same 22-bone rig as player.glb).
+ * Returns the cached scene; the caller clones it with SkeletonUtils.
+ * @returns {Promise<import('three').Object3D|null>}
+ */
+export function loadCharacterGLB(url) {
+  return cached(url, () => gltfLoader.loadAsync(url).then((gltf) => gltf.scene))
+}
+
 /** @returns {Promise<import('three').Texture|null>} */
 export function loadTexture(url) {
   return cached(url, () =>
     textureLoader.loadAsync(url).then((tex) => configureAvatarTexture(tex)),
+  )
+}
+
+/**
+ * Loads an accessory (OBJ) texture. Unlike GLB skins these keep three's default flipY,
+ * as in Boxity's reference renderer; pixel-art filtered and sRGB.
+ * @returns {Promise<import('three').Texture|null>}
+ */
+export function loadAccessoryTexture(url) {
+  return cached(`obj:${url}`, () =>
+    textureLoader.loadAsync(url).then((tex) => {
+      tex.colorSpace = SRGBColorSpace
+      tex.magFilter = NearestFilter
+      tex.minFilter = NearestFilter
+      tex.needsUpdate = true
+      return tex
+    }),
   )
 }
 

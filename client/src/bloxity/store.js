@@ -33,10 +33,18 @@ export const useBloxityStore = create((set) => ({
   /** Body proportions from `avatar.getProportions()`. */
   proportions: DEFAULT_PROPORTIONS,
 
+  /**
+   * Emote the local character is playing: { id, at } (at = performance.now() when it
+   * started), or null. Set from Boxity's 'play_emote' event; cleared when it ends or
+   * the player moves. Network code can replicate `id`.
+   */
+  emote: null,
+
   setStatus: (status, error = null) => set({ status, error }),
   setUser: (user) => set({ user }),
   setGuest: (guest) => set({ guest }),
   setEquipped: (equipped) => set({ equipped }),
+  setEmote: (emote) => set({ emote }),
   setProportions: (proportions) =>
     set({ proportions: { ...DEFAULT_PROPORTIONS, ...(proportions || {}) } }),
 }))

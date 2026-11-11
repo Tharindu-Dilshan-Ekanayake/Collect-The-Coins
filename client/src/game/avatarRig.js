@@ -1,4 +1,4 @@
-import { NearestFilter, Quaternion, SRGBColorSpace, Vector3 } from 'three'
+import { Euler, Matrix4, NearestFilter, Quaternion, SRGBColorSpace, Vector3 } from 'three'
 
 import { BACK_BONE, HAT_BONE, NECK_OFFSET_BONE, PART_SLOTS } from '../bloxity/avatarAssets'
 
@@ -19,7 +19,9 @@ import { BACK_BONE, HAT_BONE, NECK_OFFSET_BONE, PART_SLOTS } from '../bloxity/av
  *  1. Body parts are NOT attached to bones. Each is a separate SkinnedMesh sharing one
  *     skeleton, so equipping a part means swapping that mesh's geometry (remapping
  *     skin indices into the base skeleton's bone order first).
- *  2. Accessories DO attach to bones: hats to `Neck1`, back items to `Spine2`.
+ *  2. Accessories DO attach to bones: hats to `Neck1`, back items to `Spine2`, and the
+ *     SDK's accessory slots (hair, mask, neck, chest, waist, hand, shoes, …) to the bone
+ *     each slot names, placed with the rest-pose inverse captured at load.
  *
  * player.glb ships no animation clips, so the character is posed, not animated.
  */
@@ -43,6 +45,8 @@ export function collectRig(root) {
     backBone: null,
     neckOffsetBindY: 0,
     skinnedMeshes: [],
+    /** Geometry clones made by applyPart, disposed with the avatar. */
+    ownedGeometries: new Set(),
     /** Rest Y of the character root, so the run-cycle bob can return to it. */
     rootRestY: root.position.y,
   }
@@ -50,6 +54,16 @@ export function collectRig(root) {
   const meshBySlot = new Map(
     Object.entries(PART_SLOTS).map(([slot, cfg]) => [cfg.mesh.toLowerCase(), slot]),
   )
+
+  // Rest pose of every bone in model space, captured before any animation or
+  // proportions touch the rig. Accessories are authored in this pose:
+  //   local = restInverse(bone) * translate(origin)
+  // (skeleton.boneInverses are NOT used: the leaf bones' inverse binds in player.glb
+  // are 90 degrees off their rest pose.)
+  const rest = captureRestPose(root)
+  rig.restInverse = rest.restInverse
+  /** Every bone by name, including the *_leaf bones that don't skin anything. */
+  rig.bonesByName = rest.bonesByName
 
   root.traverse((node) => {
     if (node.isSkinnedMesh) {
@@ -192,6 +206,7 @@ export function applyPart(rig, slot, partScene) {
   }
 
   const geometry = skinnedSource.geometry.clone()
+  rig.ownedGeometries?.add(geometry)
 
   const baseIndexByName = new Map()
   baseSkeleton.bones.forEach((bone, i) => baseIndexByName.set(bone.name, i))
@@ -339,12 +354,54 @@ const sway = (rig, name, angle) => rotateBone(rig, name, 'axisZ', angle)
  *   full-amplitude run, so the cycle scales smoothly from a walk to a sprint.
  */
 export function animateRig(rig, motion) {
+  animateBase(rig, motion)
+  if (!rig?.skeleton || !motion || motion.dance) return
+  const g = motion.grab
+  const s = g >= 0 && g < 1 ? Math.sin(g * Math.PI) : 0
+  if (motion.holding) {
+    // Holding a tool (other players): a relaxed carry, the hand just in front of the hip
+    // with the elbow bent; a grab swings the tool forward through the coins and the body
+    // leans into it.
+    swing(rig, 'ArmR1', -0.3 - 0.65 * s)
+    swing(rig, 'ArmR2', -0.6 + 0.15 * s)
+    sway(rig, 'ArmR1', 0.05)
+    swing(rig, 'Spine1', -0.22 * s)
+    return
+  }
+  // Bare hands reaching for coins: the right arm swings out and back.
+  if (s) {
+    swing(rig, 'ArmR1', -1.6 * s)
+    swing(rig, 'ArmR2', -0.5 * s)
+    swing(rig, 'Spine1', -0.15 * s)
+  }
+}
+
+function animateBase(rig, motion) {
   if (!rig?.skeleton || !motion) return
 
   const { time = 0, speed = 0, grounded = true, maxSpeed = 6 } = motion
   const ratio = Math.min(speed / Math.max(maxSpeed, 0.001), 1)
 
   rig.root.position.y = rig.rootRestY
+
+  // --- Victory dance: arms pumping overhead, bouncing, hips swaying ----------
+  if (motion.dance && grounded) {
+    const p = time * 8
+    const beat = Math.sin(p)
+    swing(rig, 'ArmL1', -2.5 + beat * 0.55)
+    swing(rig, 'ArmR1', -2.5 - beat * 0.55)
+    sway(rig, 'ArmL1', -0.35)
+    sway(rig, 'ArmR1', 0.35)
+    swing(rig, 'ArmL2', 0.5 + Math.max(0, beat) * 0.5)
+    swing(rig, 'ArmR2', 0.5 + Math.max(0, -beat) * 0.5)
+    swing(rig, 'LegL1', beat * 0.55)
+    swing(rig, 'LegR1', -beat * 0.55)
+    swing(rig, 'LegL2', Math.max(0, -beat) * 0.9)
+    swing(rig, 'LegR2', Math.max(0, beat) * 0.9)
+    swing(rig, 'Spine1', Math.sin(p * 0.5) * 0.18)
+    rig.root.position.y = rig.rootRestY + Math.abs(beat) * 0.24
+    return
+  }
 
   // --- Airborne: tuck the legs, throw the arms up ---------------------------
   if (!grounded) {
@@ -353,7 +410,7 @@ export function animateRig(rig, motion) {
     swing(rig, 'LegR1', 0.3)
     swing(rig, 'LegR2', 0.2)
     swing(rig, 'ArmL1', -2.1)
-    swing(rig, 'ArmR1', -2.1)
+    if (!motion.holding) swing(rig, 'ArmR1', -2.1)
     swing(rig, 'Spine1', -0.1)
     return
   }
@@ -382,12 +439,193 @@ export function animateRig(rig, motion) {
   swing(rig, 'LegR2', Math.max(0, cycle) * 1.1 * ratio)
 
   // Arms counter-swing against the legs.
+  // (A held tool keeps the right arm still; animateRig poses it.)
   swing(rig, 'ArmL1', -cycle * armAmp)
-  swing(rig, 'ArmR1', cycle * armAmp)
   swing(rig, 'ArmL2', Math.max(0, cycle) * 0.5 * ratio)
-  swing(rig, 'ArmR2', Math.max(0, -cycle) * 0.5 * ratio)
+  if (!motion.holding) {
+    swing(rig, 'ArmR1', cycle * armAmp)
+    swing(rig, 'ArmR2', Math.max(0, -cycle) * 0.5 * ratio)
+  }
 
   // Lean into the run, and bob once per step (twice per full cycle).
   swing(rig, 'Spine1', -0.14 * ratio)
   rig.root.position.y = rig.rootRestY + Math.abs(Math.cos(phase)) * 0.18 * ratio
+}
+
+/* ---------------------------------------------------------------------------
+ * Accessory slots (hair, mask, neck, chest, waist, hand, shoes, and any slot the SDK
+ * adds later). Everything here runs at load time except followAccessories(), which
+ * runs per frame and allocates nothing.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Model-space rest inverse of every bone: inverse(inverse(model.matrixWorld) *
+ * bone.matrixWorld). Call right after the GLB loads, before posing.
+ */
+export function captureRestPose(root) {
+  root.updateMatrixWorld(true)
+  const modelInverse = root.matrixWorld.clone().invert()
+  const restInverse = {}
+  const bonesByName = {}
+  root.traverse((node) => {
+    if (!node.isBone) return
+    bonesByName[node.name] = node
+    restInverse[node.name] = modelInverse.clone().multiply(node.matrixWorld).invert()
+  })
+  return { restInverse, bonesByName }
+}
+
+/** restInverse(bone) * [scale(-1,1,1)] * translate(origin). */
+export function accessoryLocal(restInverse, boneName, origin, mirrored = false) {
+  const base = restInverse?.[boneName]
+  if (!base) return null
+  const local = base.clone()
+  if (mirrored) local.multiply(new Matrix4().makeScale(-1, 1, 1))
+  return local.multiply(new Matrix4().makeTranslation(origin[0], origin[1], origin[2]))
+}
+
+/**
+ * Attaches one loaded accessory object for an SDK slot. Returns the entries created
+ * (one, or two with the mirrored copy). Bone-following items go under their bone with
+ * a fixed matrix; position+rotation-only items (inheritScale false: hands, shoes) go
+ * under `holder` and are placed every frame by followAccessories().
+ *
+ * @param {object} rig from collectRig
+ * @param {{ bone: string, mirrorBone?: string, origin: number[], inheritScale: boolean }} slot
+ * @param {import('three').Object3D} object
+ * @param {import('three').Object3D} holder sibling of the character, identity transform
+ * @param {(boneName: string, mirrored: boolean) => import('three').Matrix4|null} [localFor]
+ *   overrides the local matrix (custom characters)
+ */
+export function attachSlotAccessory(rig, slot, object, holder, localFor) {
+  const entries = []
+  const makeLocal = localFor || ((bone, mirrored) => accessoryLocal(rig.restInverse, bone, slot.origin, mirrored))
+  const parts = [{ object, bone: slot.bone, mirrored: false }]
+  if (slot.mirrorBone) parts.push({ object: object.clone(), bone: slot.mirrorBone, mirrored: true })
+  const followOnly = slot.inheritScale === false
+  for (const part of parts) {
+    const bone = rig.bonesByName?.[part.bone]
+    const local = makeLocal(part.bone, part.mirrored)
+    if (!bone || !local || (followOnly && !holder)) continue
+    part.object.matrixAutoUpdate = false
+    part.object.traverse((child) => {
+      if (child.isMesh) child.castShadow = true
+    })
+    if (followOnly) {
+      holder.add(part.object)
+    } else {
+      part.object.matrix.copy(local)
+      bone.add(part.object)
+    }
+    entries.push({ object: part.object, bone, local, followOnly })
+  }
+  return entries
+}
+
+const _inv = new Matrix4()
+const _rel = new Matrix4()
+const _fp = new Vector3()
+const _fs = new Vector3()
+const _fq = new Quaternion()
+const _one = new Vector3(1, 1, 1)
+
+/**
+ * Places position+rotation-only accessories: compose(bone position, bone rotation,
+ * scale 1) * local, in the holder's space. Proportions here move bones (shoulder
+ * width, leg spacing, torso width), so the items follow them with no extra offset.
+ *
+ * @param {import('three').Object3D} space the group holding both the character and
+ *   `holder`; updated here so bone world matrices are current for this frame
+ */
+export function followAccessories(followers, holder, space) {
+  if (!followers.length || !holder || !space) return
+  space.updateMatrixWorld(true)
+  _inv.copy(holder.matrixWorld).invert()
+  for (let i = 0; i < followers.length; i += 1) {
+    const entry = followers[i]
+    _rel.multiplyMatrices(_inv, entry.bone.matrixWorld)
+    _rel.decompose(_fp, _fq, _fs)
+    entry.object.matrix.compose(_fp, _fq, _one).multiply(entry.local)
+  }
+}
+
+const _hand = new Matrix4()
+const _handPos = new Vector3()
+
+/**
+ * Puts `target` on a bone (default: the right hand, at the end of the forearm), turned by
+ * however far the bone has rotated from its rest pose. `target` must share the avatar's
+ * parent (identity avatar group), so what's inside it is authored in the avatar's rest
+ * pose (arm hanging down), in metres, relative to the bone. Runs per frame after the
+ * pose; allocates nothing. `fresh`: matrices were already updated this frame.
+ * False if the rig has no such bone.
+ */
+export function followBone(rig, target, boneName = 'ArmR2_leaf', fresh = false) {
+  const bone = rig?.bonesByName?.[boneName]
+  const restInverse = rig?.restInverse?.[boneName]
+  const parent = target?.parent
+  if (!bone || !restInverse || !parent) return false
+  if (!fresh) parent.updateMatrixWorld(true)
+  _hand.copy(parent.matrixWorld).invert().multiply(bone.matrixWorld)
+  _handPos.setFromMatrixPosition(_hand)
+  _hand.multiply(restInverse).decompose(_fp, _fq, _fs)
+  target.position.copy(_handPos)
+  target.quaternion.copy(_fq)
+  return true
+}
+
+/* ---------------------------------------------------------------------------
+ * Emotes: clips are degree deltas over the bind pose per bone, euler XYZ
+ * right-multiplied onto the bind quaternion, smoothstep between keys.
+ * ------------------------------------------------------------------------- */
+
+const _euler = new Euler()
+const _eq = new Quaternion()
+const _target = new Quaternion()
+
+/**
+ * Poses the rig at time `t` (seconds, already wrapped for looping clips) of a
+ * prepared clip, blended over the current pose by `weight` (0..1).
+ *
+ * @param {{ len: number, loop: boolean, tracks: { bone: string, keys: Float32Array }[] }} clip
+ *   keys are [time, xRad, yRad, zRad] quadruples, sorted by time
+ */
+export function applyEmote(rig, clip, t, weight) {
+  if (!rig?.bones || !clip) return
+  for (let i = 0; i < clip.tracks.length; i += 1) {
+    const track = clip.tracks[i]
+    const entry = rig.bones[track.bone]
+    if (!entry) continue // bones this rig doesn't have are ignored
+    const k = track.keys
+    const n = k.length / 4
+    let x
+    let y
+    let z
+    if (n === 1 || t <= k[0]) {
+      x = k[1]
+      y = k[2]
+      z = k[3]
+    } else if (t >= k[(n - 1) * 4]) {
+      const j = (n - 1) * 4
+      x = k[j + 1]
+      y = k[j + 2]
+      z = k[j + 3]
+    } else {
+      let j = 0
+      while (j < n - 2 && t > k[(j + 1) * 4]) j += 1
+      const a = j * 4
+      const b = a + 4
+      const span = k[b] - k[a]
+      let u = span > 0 ? (t - k[a]) / span : 1
+      u = u * u * (3 - 2 * u)
+      x = k[a + 1] + (k[b + 1] - k[a + 1]) * u
+      y = k[a + 2] + (k[b + 2] - k[a + 2]) * u
+      z = k[a + 3] + (k[b + 3] - k[a + 3]) * u
+    }
+    _euler.set(x, y, z, 'XYZ')
+    _eq.setFromEuler(_euler)
+    _target.copy(entry.origQuat).multiply(_eq)
+    if (weight >= 1) entry.bone.quaternion.copy(_target)
+    else entry.bone.quaternion.slerp(_target, weight)
+  }
 }

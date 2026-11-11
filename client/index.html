@@ -4,11 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Power Per Click</title>
+    <title>Coinhaven</title>
 
-    <!-- Bloxity SDK. Exposes itself as window.Legion.SDK.
-         Must load before the Vite entry script below. -->
-    <script src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
+    <!-- Boxity SDK (window.Legion.SDK), always from sdk.bloxity.io, never bundled.
+         `async` so it never blocks the first paint or the game's own scripts (as a
+         plain or deferred script it held the app back ~2.5 s on 4G). bloxity/sdk.js
+         waits for window.Legion.SDK, and the game waits for it before matchmaking.
+         The environment (window.BLOXITY_ENV) is injected by Boxity on pages it serves,
+         and by the Vite dev server locally; never by a production build. -->
+    <script async src="https://sdk.bloxity.io/v1/legion-sdk.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
