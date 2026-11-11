@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
+import { BOARDS } from '@shared/leaderboards.js'
+
+import { registerDebug } from '../game/lib/debug'
 import { BloxityContext } from './BloxityContext'
+import { startEmotes } from './emotes'
+import { getAuthToken } from './platform'
 import { getSDK, safeCall, toUnsubscribe, waitForSDK } from './sdk'
 import { DEFAULT_PROPORTIONS, useBloxityStore } from './store'
 
@@ -34,23 +39,26 @@ function isResetSentinel(equipped) {
 }
 
 /**
- * Bloxity's real endpoints.
- *
- * These MUST be passed explicitly. If `init()` receives neither `apiUrl` nor
- * `portalUrl`, the SDK checks whether it is running on localhost/127.0.0.1 and, if
- * so, silently repoints BOTH at `window.location.origin` - i.e. at the Vite dev
- * server. `showAuthPopup()` then opens `http://localhost:5173/auth?popup=1`, Vite's
- * SPA fallback serves the game again inside the popup, no token is ever posted back,
- * and login can never succeed. That fallback is meant for people running the whole
- * Bloxity portal locally; for game development it has to be overridden.
+ * Endpoints are NOT passed to init(): the platform tells the SDK which environment it
+ * is in (window.BLOXITY_ENV on pages Boxity serves, the portal handshake when
+ * embedded, the dev-server injection locally; see vite.config.js and environment.js).
+ * One build runs unchanged on prod, stage and local.
  */
-const PORTAL_URL = import.meta.env.VITE_BLOXITY_PORTAL_URL || 'https://bloxity.io'
-const API_URL = import.meta.env.VITE_BLOXITY_API_URL || 'https://api.bloxity.io'
-
-function initOnce(gameSlug, signal) {
+/**
+ * Shared by every mount and never aborted: React StrictMode mounts effects twice in
+ * dev, and aborting the first mount's wait used to reject this promise for both, so
+ * the guest identity (name, picture) never reached the game.
+ */
+function initOnce(gameSlug) {
   if (!initPromise) {
-    initPromise = waitForSDK({ signal }).then((sdk) => {
-      sdk.init({ gameSlug, apiUrl: API_URL, portalUrl: PORTAL_URL })
+    initPromise = waitForSDK().then((sdk) => {
+      sdk.init({ gameSlug })
+      // Declare the leaderboards once, right after init (this is what shows Boxity's
+      // trophy button). The server submits every score.
+      safeCall(sdk.leaderboard?.define?.bind(sdk.leaderboard), BOARDS)
+      // Boot-time feature registration (Boxity shows the emote button only for games
+      // that registered), before any assets load.
+      startEmotes(sdk)
       return sdk
     })
     // A failed init shouldn't poison every later attempt (e.g. HMR reload).
@@ -68,10 +76,35 @@ function initOnce(gameSlug, signal) {
  *
  * @param {{ gameSlug?: string, children: React.ReactNode }} props
  */
+/**
+ * Only if Boxity gives no guest identity (SDK blocked or slow): a random name kept in
+ * this browser, so a guest is never just "Guest".
+ */
+const GUEST_ADJ = ['Swift', 'Lucky', 'Brave', 'Sunny', 'Misty', 'Jolly', 'Bold', 'Clever']
+const GUEST_NOUN = ['Otter', 'Fox', 'Panda', 'Owl', 'Hawk', 'Wolf', 'Tiger', 'Yeti']
+function makeLocalGuest() {
+  let name = ''
+  try {
+    name = localStorage.getItem('ctc.guestName') || ''
+  } catch {
+    // ignore
+  }
+  if (!name) {
+    const pick = (list) => list[Math.floor(Math.random() * list.length)]
+    name = `${pick(GUEST_ADJ)}${pick(GUEST_NOUN)}${10 + Math.floor(Math.random() * 90)}`
+    try {
+      localStorage.setItem('ctc.guestName', name)
+    } catch {
+      // ignore
+    }
+  }
+  return { displayName: name, username: name }
+}
+const localGuest = makeLocalGuest()
+
 export function BloxityProvider({ gameSlug, children }) {
-  // >>> FILL ME IN <<< Set VITE_GAME_SLUG in client/.env to the slug from your
-  // Bloxity developer dashboard. The `gameSlug` prop overrides it if passed.
-  const slug = gameSlug || import.meta.env.VITE_GAME_SLUG || 'MY_GAME_SLUG'
+  // The game's Boxity id. VITE_GAME_SLUG or the `gameSlug` prop override it.
+  const slug = gameSlug || import.meta.env.VITE_GAME_SLUG || 'collect-the-coins'
 
   const status = useBloxityStore((s) => s.status)
   const error = useBloxityStore((s) => s.error)
@@ -83,21 +116,14 @@ export function BloxityProvider({ gameSlug, children }) {
   const sdkRef = useRef(null)
 
   useEffect(() => {
-    if (slug === 'MY_GAME_SLUG') {
-      console.warn(
-        '[bloxity] VITE_GAME_SLUG is still the placeholder "MY_GAME_SLUG". ' +
-          'Set it in client/.env before testing a real login.',
-      )
-    }
-
-    const controller = new AbortController()
     const store = useBloxityStore.getState()
+    registerDebug('bloxity', useBloxityStore) // ?debug / dev builds only
     const unsubscribers = []
     let cancelled = false
 
     store.setStatus('loading')
 
-    initOnce(slug, controller.signal)
+    initOnce(slug)
       .then((sdk) => {
         if (cancelled) return
         sdkRef.current = sdk
@@ -174,7 +200,6 @@ export function BloxityProvider({ gameSlug, children }) {
 
     return () => {
       cancelled = true
-      controller.abort()
       unsubscribers.forEach((fn) => safeCall(fn))
     }
   }, [slug])
@@ -189,6 +214,8 @@ export function BloxityProvider({ gameSlug, children }) {
     safeCall(sdk.auth.showAuthPopup?.bind(sdk.auth))
   }, [])
 
+  // Inside Boxity the toolbar handles accounts: these exist only for a game page that
+  // also runs outside Boxity, and are never called automatically.
   const logout = useCallback(() => {
     const sdk = sdkRef.current || getSDK()
     if (!sdk) return
@@ -203,6 +230,8 @@ export function BloxityProvider({ gameSlug, children }) {
         safeCall((sdkRef.current || getSDK())?.game?.loadingStep, label),
       loadingEnd: () => safeCall((sdkRef.current || getSDK())?.game?.loadingEnd),
       updateRoom: (room) => safeCall((sdkRef.current || getSDK())?.game?.updateRoom, room),
+      /** JWT for the game server, read live (never cached). */
+      getToken: getAuthToken,
     }),
     [],
   )
@@ -216,9 +245,11 @@ export function BloxityProvider({ gameSlug, children }) {
       guest,
       isLoggedIn: Boolean(user),
       /** Always something displayable, per the getUser() || getGuest() pattern. */
-      identity: user || guest,
+      identity: user || guest || localGuest,
       login,
       logout,
+      /** JWT for the game server, read live from the SDK (never cached). */
+      getToken: getAuthToken,
       avatar: equipped,
       proportions: proportions || DEFAULT_PROPORTIONS,
       game,

@@ -1,0 +1,6 @@
+{
+  "name": "shared",
+  "private": true,
+  "type": "module",
+  "description": "Game rules shared by the client and the Colyseus server (pure ES modules, no dependencies)."
+}
