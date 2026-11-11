@@ -98,7 +98,9 @@ function readUrlPreset() {
 
 const urlPreset = readUrlPreset()
 const savedMode = readSaved()
-const initialMode = urlPreset || (PRESETS[savedMode] ? savedMode : 'auto')
+// Default is LOW for everyone until they pick something in Settings (or Boxity's menu).
+// `auto` is still a choice: it detects the device and drops on slow frames.
+const initialMode = urlPreset || (PRESETS[savedMode] || savedMode === 'auto' ? savedMode : 'low')
 const initialPreset = initialMode === 'auto' ? detectPreset() : initialMode
 
 export const useQuality = create((set, get) => ({
