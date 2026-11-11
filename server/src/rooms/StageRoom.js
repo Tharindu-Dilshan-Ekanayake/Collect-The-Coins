@@ -15,7 +15,7 @@ import { mapById } from '../../../shared/maps.js'
 import { GOBLIN_MAX, createGoblin, stepGoblin } from '../../../shared/goblins.js'
 import { CHEST_REACH, GRAB_REACH, applyTake, generatePool } from '../../../shared/pool.js'
 import { reportScore } from '../bloxity.js'
-import { loadProgress, saveProgress } from '../progress.js'
+import { loadProgress, progressKey, sanitizeGid, saveProgress } from '../progress.js'
 import { GoblinState, StagePlayer, StageState } from './schema.js'
 
 const num = (v, fallback = 0) => (Number.isFinite(v) ? v : fallback)
@@ -42,6 +42,11 @@ export class StageRoom extends Room {
     this.maxClients = Math.min(4, Math.max(1, Math.round(num(options?.size, 4))))
     this.setPrivate(true) // only reserved seats from the lobby get in
     this.map = mapById(options?.modeId)
+    /** Which team this run belongs to ('solo' or a hash): the save slot of every member. */
+    this.team = typeof options?.team === 'string' && /^[a-f0-9]{12}$/.test(options.team) ? options.team : 'solo'
+    this.saveKey = progressKey(this.map.id, this.team)
+    /** Guest ids by session, handed back to the lobby with each seat. */
+    this.gids = new Map()
     this.pool = generatePool(this.map)
     this.lastGrab = new Map()
     this.carry = new Map()
@@ -54,6 +59,7 @@ export class StageRoom extends Room {
 
     const s = new StageState()
     s.modeId = this.map.id
+    s.team = this.team
     s.difficulty = options?.difficulty || 'easy'
     // TEST_STAGE_GOAL lets automated tests clear a map without banking every coin.
     s.goal = Number(process.env.TEST_STAGE_GOAL) || this.map.coins
@@ -159,7 +165,7 @@ export class StageRoom extends Room {
     const json = JSON.stringify(data)
     if (this.saved.get(p.uid) === json) return
     this.saved.set(p.uid, json)
-    saveProgress(p.uid, this.map.id, data)
+    saveProgress(p.uid, this.saveKey, data)
   }
 
   /** Seats are reserved by the lobby, which passes the identity it verified as auth data. */
@@ -167,6 +173,7 @@ export class StageRoom extends Room {
     const p = new StagePlayer()
     p.name = sanitizeName(options?.name)
     p.uid = auth?.accountId || ''
+    this.gids.set(client.sessionId, sanitizeGid(options?.gid))
     p.look = sanitizeLook(options?.look)
     const looks = looksFor(p.name)
     p.shirt = sanitizeColor(options?.shirt, looks.shirt)
@@ -177,7 +184,7 @@ export class StageRoom extends Room {
     for (const u of RUN_UPGRADES) p.levels.set(u.id, 0)
     // Signed in: pick up where they left off on this map.
     if (p.uid) {
-      this.applyProgress(p, await loadProgress(p.uid, this.map.id))
+      this.applyProgress(p, await loadProgress(p.uid, this.saveKey))
       this.saved.set(p.uid, JSON.stringify(this.snapshot(p)))
     }
     this.state.players.set(client.sessionId, p)
@@ -361,7 +368,7 @@ export class StageRoom extends Room {
       reportScore('runs', p.uid, 1)
       reportScore(`clear_${s.modeId}`, p.uid, ms)
       // The map is cleared: next time they start it fresh.
-      if (p.uid) saveProgress(p.uid, this.map.id, null)
+      if (p.uid) saveProgress(p.uid, this.saveKey, null)
     })
     for (const client of this.clients) {
       client.send('result', {
@@ -390,7 +397,7 @@ export class StageRoom extends Room {
         const p = this.state.players.get(client.sessionId)
         const reservation = await matchMaker.reserveSeatFor(
           room,
-          { name: p?.name, look: p?.look, shirt: p?.shirt, pants: p?.pants, skin: p?.skin },
+          { name: p?.name, look: p?.look, shirt: p?.shirt, pants: p?.pants, skin: p?.skin, gid: this.gids.get(client.sessionId) },
           { accountId: p?.uid || null, username: null },
         )
         client.send('lobby:go', { reservation })

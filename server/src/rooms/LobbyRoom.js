@@ -15,6 +15,7 @@ import {
   sanitizeName,
 } from '../../../shared/lobby.js'
 import { verifyPlayer } from '../bloxity.js'
+import { identityOf, sanitizeGid, teamKey } from '../progress.js'
 import { LobbyPlayer, LobbyState, Slot } from './schema.js'
 
 const num = (v, fallback = 0) => (Number.isFinite(v) ? v : fallback)
@@ -31,6 +32,8 @@ export class LobbyRoom extends Room {
     this.setState(new LobbyState())
     for (let i = 0; i < PARTY_SLOTS; i += 1) this.state.slots.push(new Slot())
     this.setPatchRate(50)
+    /** Guest ids by session (server only), so a party's team can be told apart. */
+    this.gids = new Map()
     /** Slots whose party is being sent to a stage right now. */
     this.launching = new Set()
     /** Epoch ms each slot's party leaves (server only; clients see whole seconds left). */
@@ -101,6 +104,7 @@ export class LobbyRoom extends Room {
     const p = new LobbyPlayer()
     p.name = sanitizeName(options?.name || auth?.username)
     p.uid = auth?.accountId || ''
+    this.gids.set(client.sessionId, sanitizeGid(options?.gid))
     p.look = sanitizeLook(options?.look)
     const looks = looksFor(p.name)
     p.shirt = sanitizeColor(options?.shirt, looks.shirt)
@@ -113,6 +117,7 @@ export class LobbyRoom extends Room {
 
   onLeave(client) {
     this.leaveParty(client.sessionId)
+    this.gids.delete(client.sessionId)
     this.state.players.delete(client.sessionId)
   }
 
@@ -200,7 +205,11 @@ export class LobbyRoom extends Room {
     const { modeId, difficulty } = s
     this.launching.add(index)
     try {
-      const room = await matchMaker.createRoom('stage', { modeId, difficulty, size: members.length })
+      // Who is in the team decides which save they continue (solo = a team of one).
+      const team = teamKey(
+        members.map((id) => identityOf(this.clients.getById(id)?.auth?.accountId, this.gids.get(id), id)),
+      )
+      const room = await matchMaker.createRoom('stage', { modeId, difficulty, size: members.length, team })
       for (const id of members) {
         const client = this.clients.getById(id)
         const p = this.state.players.get(id)
@@ -208,7 +217,7 @@ export class LobbyRoom extends Room {
         // The verified identity travels with the seat as auth data (server to server).
         const reservation = await matchMaker.reserveSeatFor(
           room,
-          { name: p.name, look: p.look, shirt: p.shirt, pants: p.pants, skin: p.skin },
+          { name: p.name, look: p.look, shirt: p.shirt, pants: p.pants, skin: p.skin, gid: this.gids.get(id) },
           client.auth || { accountId: null, username: null },
         )
         client.send('party:go', { reservation, modeId, difficulty })

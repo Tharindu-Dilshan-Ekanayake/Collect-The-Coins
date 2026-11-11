@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,9 +13,30 @@ import { sanitizeProgress } from '../../shared/economy.js'
  * next to the server. Every call is safe to await: a database failure is logged and
  * never breaks a match.
  *
- * Key: `${accountId}:${mapId}`. Only Boxity-verified account ids are used; guests keep
- * their progress in their own browser.
+ * Progress belongs to a TEAM on a map: the same people on the same map pick up where
+ * they left off, while playing solo or with other people is a separate save that starts
+ * fresh. Key: `${accountId}:${mapId}~${team}` (see teamKey). Only Boxity-verified
+ * account ids are used; guests keep their progress in their own browser.
  */
+
+/** A browser's stable guest id (client generated, only ever used to tell teams apart). */
+export const sanitizeGid = (v) => (typeof v === 'string' && /^[A-Za-z0-9_-]{8,40}$/.test(v) ? v : '')
+
+/**
+ * Who a player is for team purposes: their verified account, else their guest id, else
+ * (an old client) their session, which makes them a team of their own every time.
+ */
+export const identityOf = (accountId, gid, sessionId) => (accountId ? `a:${accountId}` : gid ? `g:${gid}` : `s:${sessionId}`)
+
+/** 'solo' for one player, else a short hash of the sorted member identities. */
+export function teamKey(identities) {
+  const ids = [...new Set(identities)].sort()
+  if (ids.length <= 1) return 'solo'
+  return crypto.createHash('sha1').update(ids.join('|')).digest('hex').slice(0, 12)
+}
+
+/** The save slot for a map and team. */
+export const progressKey = (mapId, team) => `${mapId}~${team || 'solo'}`
 
 const MONGODB_URI = process.env.MONGODB_URI || ''
 const COLLECTION = 'progress'
