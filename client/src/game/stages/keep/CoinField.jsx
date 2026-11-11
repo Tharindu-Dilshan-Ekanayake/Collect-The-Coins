@@ -19,6 +19,7 @@ import {
 import { LAYER, POOL_FLOOR, applyTake, generatePool, planTake, stackTopY } from '@shared/pool.js'
 
 import { sfx } from '../../../state/audio'
+import { input, isTouchDevice } from '../../../state/input'
 import { useQuality } from '../../../state/quality'
 import { useRun } from '../../../state/run'
 import { GRAB_REACH, TOOLS, grabInterval, grabSize } from '../../../state/stageContent'
@@ -348,12 +349,13 @@ export function CoinField({ bodyRef, coinGeometry, coinMaterial, room = null }) 
       return n
     }
 
-    const grabAtPointer = () => {
+    /** `center`: aim at the crosshair (the COLLECT button) instead of the pointer. */
+    const grabAtPointer = (center = false) => {
       const body = bodyRef.current
       if (!body) return
       const tool = toolNow()
       if (tool.passive) return
-      _ndc.set(pointer.x, pointer.y)
+      _ndc.set(center ? 0 : pointer.x, center ? 0 : pointer.y)
       _ray.setFromCamera(_ndc, camera)
       if (!_ray.ray.intersectPlane(_plane, _hit)) return
       const pad = tool.radius
@@ -401,7 +403,16 @@ export function CoinField({ bodyRef, coinGeometry, coinMaterial, room = null }) 
     el.addEventListener('pointerup', onUp)
     el.addEventListener('pointercancel', onUp)
 
+    let collectLast = 0
     const holdTimer = setInterval(() => {
+      if (input.collect) {
+        const t = performance.now()
+        if (t - collectLast >= interval()) {
+          collectLast = t
+          grabAtPointer(true)
+        }
+        return
+      }
       if (!pointer.down) return
       const now = performance.now()
       if (pointer.touch && (pointer.moved || now - pointer.t0 < 220)) return
@@ -411,6 +422,7 @@ export function CoinField({ bodyRef, coinGeometry, coinMaterial, room = null }) 
       }
     }, 33)
 
+    const touchAim = isTouchDevice()
     // White highlight: which coins the next grab would take. Ten times a second, not per frame.
     const highlightMesh = highlightRef.current
     const previewTimer = setInterval(() => {
@@ -419,11 +431,12 @@ export function CoinField({ bodyRef, coinGeometry, coinMaterial, room = null }) 
       const body = bodyRef.current
       const run = useRun.getState()
       const tool = toolNow()
-      if (!body || pointer.touch || tool.passive || run.result || run.panel || run.room() <= 0) {
+      if (!body || tool.passive || run.result || run.panel || run.room() <= 0) {
         mesh.count = 0
         return
       }
-      _ndc.set(pointer.x, pointer.y)
+      // Phones aim with the crosshair (COLLECT); a mouse aims at the pointer.
+      _ndc.set(touchAim ? 0 : pointer.x, touchAim ? 0 : pointer.y)
       _ray.setFromCamera(_ndc, camera)
       if (!_ray.ray.intersectPlane(_plane, _hit)) {
         mesh.count = 0

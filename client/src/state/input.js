@@ -16,6 +16,8 @@ export const input = {
   joyX: 0,
   joyY: 0,
   touchJump: false,
+  /** Touch COLLECT button held: grab at the crosshair (screen centre) over and over. */
+  collect: false,
   /** performance.now() of the last jump press, so a tap shorter than a frame still jumps. */
   jumpPressedAt: -Infinity,
   /** Boxity camera_sensitivity (0.1..5): scales mouse/touch look speed. */

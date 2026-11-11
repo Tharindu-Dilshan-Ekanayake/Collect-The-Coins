@@ -6,6 +6,7 @@ import { isMuted, setMuted, sfx } from '../state/audio'
 import { useGame } from '../state/game'
 import { useRun } from '../state/run'
 import { PRESET_ORDER, useQuality } from '../state/quality'
+import { isTouchDevice } from '../state/input'
 import { GearIcon, SoundIcon } from './icons'
 
 /**
@@ -16,20 +17,34 @@ function PlayerCard() {
   const { identity, isLoggedIn } = useBloxity()
   const name = identity?.displayName || identity?.username || 'Guest'
   const pfp = identity?.pfp
+  // Phones: a slim tag (picture + name), no second line.
+  const touch = isTouchDevice()
 
   return (
-    <div className="panel pointer-events-auto flex items-center gap-2 !rounded-2xl px-2 py-1.5 sm:gap-3 sm:px-3">
+    <div
+      className={`panel pointer-events-auto flex items-center !rounded-2xl ${
+        touch ? 'gap-1.5 !rounded-full py-0.5 pr-3 pl-0.5' : 'gap-2 px-2 py-1.5 sm:gap-3 sm:px-3'
+      }`}
+    >
       {pfp ? (
-        <img src={pfp} alt="" className="h-9 w-9 rounded-full border-2 border-bark object-cover" />
+        <img src={pfp} alt="" className={`rounded-full border-2 border-bark object-cover ${touch ? 'h-8 w-8' : 'h-9 w-9'}`} />
       ) : (
-        <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-bark bg-gold text-lg font-bold text-ink">
+        <div
+          className={`flex items-center justify-center rounded-full border-2 border-bark bg-gold font-bold text-ink ${
+            touch ? 'h-8 w-8 text-base' : 'h-9 w-9 text-lg'
+          }`}
+        >
           {name.charAt(0).toUpperCase()}
         </div>
       )}
-      <div className="hidden leading-tight sm:block">
-        <div className="max-w-32 truncate text-sm font-bold">{name}</div>
-        <div className="text-xs text-bark/80">{isLoggedIn ? 'Signed in' : 'Playing as guest'}</div>
-      </div>
+      {touch ? (
+        <div className="max-w-24 truncate text-xs font-bold">{name}</div>
+      ) : (
+        <div className="hidden leading-tight sm:block">
+          <div className="max-w-32 truncate text-sm font-bold">{name}</div>
+          <div className="text-xs text-bark/80">{isLoggedIn ? 'Signed in' : 'Playing as guest'}</div>
+        </div>
+      )}
     </div>
   )
 }
@@ -93,6 +108,7 @@ function TopRight() {
   const openPanel = useGame((s) => s.openPanel)
   const closePanel = useGame((s) => s.closePanel)
   const open = panel === 'settings'
+  const touch = isTouchDevice()
 
   return (
     <div className="pointer-events-auto relative flex gap-2">
@@ -103,7 +119,7 @@ function TopRight() {
           setMuted(!muted)
           setMutedState(!muted)
         }}
-        className="btn h-12 w-12 !rounded-full"
+        className={`btn !rounded-full ${touch ? 'h-10 w-10' : 'h-12 w-12'}`}
         style={{ '--btn': '#f2b53a' }}
       >
         <SoundIcon muted={muted} />
@@ -116,7 +132,7 @@ function TopRight() {
           if (open) closePanel()
           else openPanel('settings')
         }}
-        className="btn h-12 w-12 !rounded-full"
+        className={`btn !rounded-full ${touch ? 'h-10 w-10' : 'h-12 w-12'}`}
         style={{ '--btn': '#f2b53a' }}
       >
         <GearIcon />
@@ -167,7 +183,7 @@ function CelebrationBanner() {
 export function Hud() {
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-end gap-2 p-3 sm:p-4">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-end gap-2 p-2 sm:p-4">
         <PlayerCard />
         <TopRight />
       </div>

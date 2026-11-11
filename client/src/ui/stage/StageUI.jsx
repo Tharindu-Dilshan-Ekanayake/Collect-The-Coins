@@ -130,23 +130,27 @@ function Objective({ touch }) {
   return (
     <>
       <div
-        className={`panel pointer-events-none absolute right-3 z-10 !rounded-2xl sm:right-4 ${
-          touch ? 'top-[4.6rem] w-36 px-2.5 py-1.5 text-sm' : 'top-20 w-56 px-3 py-2'
+        className={`panel pointer-events-none absolute z-10 !rounded-2xl ${
+          touch ? 'top-[4.1rem] right-2 w-[8.5rem] px-2.5 py-1.5' : 'top-20 right-3 w-56 px-3 py-2 sm:right-4'
         }`}
       >
-        <div className="text-xs font-bold tracking-wide text-bark/80">TREASURE BANKED</div>
-        <div className={touch ? 'text-lg font-bold' : 'text-xl font-bold'}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-bold tracking-wide text-bark/80 sm:text-xs">{touch ? 'BANKED' : 'TREASURE BANKED'}</span>
+          <span className={`font-bold text-bark/80 ${touch ? 'text-[11px]' : 'text-base'}`}>{clock(seconds)}</span>
+        </div>
+        <div className={touch ? 'text-lg leading-tight font-bold' : 'text-xl font-bold'}>
           {fmt(cleared)}
-          <span className="text-base text-bark/70"> / {fmt(goal)}</span>
+          <span className={touch ? 'text-[11px] text-bark/70' : 'text-base text-bark/70'}> / {fmt(goal)}</span>
         </div>
         <div className="mt-1 h-2.5 overflow-hidden rounded-full border-2 border-bark bg-white/60">
           <div className="h-full bg-gold transition-[width]" style={{ width: `${Math.min(100, (cleared / goal) * 100)}%` }} />
         </div>
-        <div className="mt-1 flex items-center justify-between gap-2 text-xs font-bold text-bark/70">
-          <span>{touch ? 'POOL' : 'LEFT IN POOL'}</span>
-          <span className="whitespace-nowrap">{fmt(poolLeft)}</span>
-        </div>
-        <div className="mt-0.5 text-right text-base font-bold text-bark/80">{clock(seconds)}</div>
+        {!touch && (
+          <div className="mt-1 flex items-center justify-between gap-2 text-xs font-bold text-bark/70">
+            <span>LEFT IN POOL</span>
+            <span className="whitespace-nowrap">{fmt(poolLeft)}</span>
+          </div>
+        )}
       </div>
     </>
   )
@@ -174,17 +178,23 @@ function BagAndBank({ touch }) {
   const full = bag >= cap
   if (touch) {
     return (
-      <div className="pointer-events-none absolute top-[4.9rem] left-3 z-10 flex gap-2">
-        <div className="panel flex items-center gap-1.5 !rounded-full py-0.5 pr-3 pl-1.5">
-          <BagIcon className="h-6 w-6" />
-          <span className={`text-base font-bold ${full ? 'text-[#d9483b]' : ''}`}>
-            {fmt(bag)}
-            <span className="text-xs text-bark/60">/{fmt(cap)}</span>
-          </span>
+      <div className="pointer-events-none absolute top-[4.1rem] left-2 z-10 flex flex-col gap-1.5">
+        <div className="panel flex items-center gap-1.5 !rounded-2xl py-1 pr-3.5 pl-1.5">
+          <BagIcon className="h-8 w-8" />
+          <div className="leading-tight">
+            <div className="text-[10px] font-bold text-bark/70">BAG</div>
+            <div key={bag} className={`animate-bump text-lg font-bold ${full ? 'text-[#d9483b]' : ''}`}>
+              {fmt(bag)}
+              <span className="text-xs text-bark/60"> / {fmt(cap)}</span>
+            </div>
+          </div>
         </div>
-        <div className="panel flex items-center gap-1.5 !rounded-full py-0.5 pr-3 pl-1.5">
-          <CoinIcon className="h-5 w-5" />
-          <span className="text-base font-bold">{fmt(bank)}</span>
+        <div className="panel flex items-center gap-1.5 !rounded-2xl py-1 pr-3.5 pl-1.5">
+          <CoinIcon className="h-8 w-8" />
+          <div className="leading-tight">
+            <div className="text-[10px] font-bold text-bark/70">BANK</div>
+            <div className="text-lg font-bold">{fmt(bank)}</div>
+          </div>
         </div>
       </div>
     )
@@ -221,14 +231,14 @@ function Hotbar({ touch, pulseUpgrades }) {
   const equip = useRun((s) => s.equip)
   const openPanel = useRun((s) => s.openPanel)
   // Six slots must fit a 360 px portrait phone, so touch slots scale with the width.
-  const size = touch ? 'h-[min(4.5rem,14vw)] w-[min(4.5rem,14vw)]' : 'h-[5.5rem] w-[5.5rem]'
+  const size = touch ? 'h-[min(3.4rem,11.5vw)] w-[min(3.4rem,11.5vw)]' : 'h-[5.5rem] w-[5.5rem]'
   return (
     <div
       className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center ${
-        touch ? 'bottom-3 [@media(orientation:portrait)]:bottom-[9.5rem]' : 'bottom-3'
+        touch ? 'bottom-2 [@media(orientation:portrait)]:bottom-[8.4rem]' : 'bottom-3'
       }`}
     >
-      <div className="pointer-events-auto flex items-end gap-2 sm:gap-2.5">
+      <div className={`pointer-events-auto flex items-end ${touch ? 'gap-1.5' : 'gap-2 sm:gap-2.5'}`}>
         {TOOLS.filter((t) => tools.includes(t.id)).map((t) => {
           const Icon = TOOL_ICONS[t.id] || HandIcon
           const on = equipped === t.id
@@ -269,7 +279,7 @@ function Hotbar({ touch, pulseUpgrades }) {
             sfx('click')
             openPanel('upgrades')
           }}
-          className={`btn ml-1 shrink-0 flex-col !gap-0 !rounded-2xl !p-0 text-xs ${size} ${pulseUpgrades ? 'animate-bounce ring-4 ring-white' : ''}`}
+          className={`btn ml-1 shrink-0 flex-col !gap-0 !rounded-2xl !p-0 text-xs ${size} ${pulseUpgrades ? 'animate-bounce ring-4 ring-white' : ''} ${touch ? '!w-auto min-w-[3.4rem] !px-1.5' : ''}`}
           style={{ '--btn': '#f2b53a' }}
         >
           <ScrollIcon className={touch ? 'h-[55%] w-[55%]' : 'h-11 w-11'} />
@@ -295,7 +305,7 @@ function Prompts({ touch }) {
   return (
     <div
       className={`pointer-events-none absolute inset-x-0 z-10 flex flex-col items-center gap-2 ${
-        touch ? 'bottom-24 [@media(orientation:portrait)]:bottom-64' : 'bottom-28'
+        touch ? 'bottom-[5.5rem] [@media(orientation:portrait)]:bottom-[12.5rem]' : 'bottom-28'
       }`}
     >
       {showHint && (
@@ -631,18 +641,33 @@ function TutorialCoach({ touch, step }) {
   }, [step, finish])
   if (!step || (panel && step !== 3)) return null
   const text = {
-    1: touch ? 'Tap the gold coins to grab them!' : 'Aim at the gold coins and click to grab them!',
+    1: touch ? 'Aim the ring at gold coins and hold COLLECT!' : 'Aim at the gold coins and click to grab them!',
     2: banking ? 'Stay at the chest while your bag empties into it…' : 'Nice! Carry your coins to the chest. Follow the big arrow!',
     3: touch ? 'Banked! Tap UPGRADES to grab more coins at once.' : 'Banked! Press TAB for Upgrades and grab more coins at once.',
   }[step]
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-[9.5rem] z-20 flex justify-center px-3 sm:top-24">
-        <div key={step} className="panel animate-pop pointer-events-auto flex max-w-md items-center gap-3 !rounded-2xl px-4 py-2.5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-3 border-ink bg-gold text-xl font-bold">
+      <div
+        className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center ${
+          touch
+            ? 'top-[12.4rem] px-2 [@media(orientation:landscape)]:top-2 [@media(orientation:landscape)]:pr-[15.5rem] [@media(orientation:landscape)]:pl-[10.5rem]'
+            : 'top-[9.5rem] px-3 sm:top-24'
+        }`}
+      >
+        <div
+          key={step}
+          className={`panel animate-pop pointer-events-auto flex max-w-md items-center !rounded-2xl ${
+            touch ? 'gap-2 px-2.5 py-1.5' : 'gap-3 px-4 py-2.5'
+          }`}
+        >
+          <span
+            className={`flex shrink-0 items-center justify-center rounded-full border-3 border-ink bg-gold font-bold ${
+              touch ? 'h-7 w-7 text-base' : 'h-10 w-10 text-xl'
+            }`}
+          >
             {step}
           </span>
-          <div className="text-base leading-snug font-bold">{text}</div>
+          <div className={`leading-snug font-bold ${touch ? 'text-sm' : 'text-base'}`}>{text}</div>
           <button type="button" onClick={finish} className="ml-1 shrink-0 text-xs font-bold text-bark/60 underline">
             Skip
           </button>
@@ -798,7 +823,7 @@ export default function StageUI() {
       <Hotbar touch={touch} pulseUpgrades={tutorial === 3} />
       <TutorialCoach touch={touch} step={tutorial} />
       <Prompts touch={touch} />
-      {!touch && !panel && !result && <Crosshair />}
+      {!panel && !result && <Crosshair />}
       <GrabPopups />
       {panel === 'shop' && <ToolShop />}
       {panel === 'upgrades' && <UpgradeBook />}
