@@ -100,10 +100,28 @@ async function freshClient() {
   return client
 }
 
+/**
+ * A stable random id for this browser. It never identifies anyone to Boxity: the server
+ * only uses it to tell which people played together, so a team keeps its own save.
+ */
+function guestId() {
+  try {
+    let id = localStorage.getItem('ctc.gid')
+    if (!id) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 24)
+      localStorage.setItem('ctc.gid', id)
+    }
+    return id
+  } catch {
+    return ''
+  }
+}
+const GID = guestId()
+
 /** Verified identity for the server: the Boxity token, read fresh on every join. */
 function joinOptions() {
   const token = safeCall(window.Legion?.SDK?.auth?.getToken?.bind(window.Legion.SDK.auth)) || null
-  return { ...profile, look: currentLook(), token }
+  return { ...profile, look: currentLook(), token, gid: GID }
 }
 
 /** Boxity's Join button / invites open the game with ?roomId=: try that room first. */

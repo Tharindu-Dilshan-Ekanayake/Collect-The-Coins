@@ -15,9 +15,10 @@ import {
 } from './stageContent'
 
 /**
- * Progress per map, saved in this browser: what you own and have banked. Leave a map
- * and come back and it is all still there; clearing the map starts it fresh. Signed-in
- * players are also saved on the server, which wins when they rejoin.
+ * Progress per map AND TEAM, saved in this browser: what you own and have banked. Leave a
+ * map and come back with the same people and it is all still there; playing solo or with
+ * other people is its own save that starts fresh. Clearing the map starts it fresh.
+ * Signed-in players are also saved on the server, which wins when they rejoin.
  */
 const PROGRESS_KEY = 'ctc.progress.v1'
 
@@ -29,13 +30,14 @@ function readProgress() {
   }
 }
 
-const loadSnapshot = (mapId) => sanitizeProgress(readProgress()[mapId])
+const slotKey = (mapId, team) => `${mapId}~${team || 'solo'}`
+const loadSnapshot = (mapId, team) => sanitizeProgress(readProgress()[slotKey(mapId, team)])
 
-function storeSnapshot(mapId, data) {
+function storeSnapshot(mapId, team, data) {
   try {
     const all = readProgress()
-    if (data) all[mapId] = data
-    else delete all[mapId]
+    if (data) all[slotKey(mapId, team)] = data
+    else delete all[slotKey(mapId, team)]
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(all))
   } catch {
     // Storage unavailable: progress lasts for this session only.
@@ -50,6 +52,8 @@ const isEmptySnapshot = (d) => d.bank === 0 && d.tools.length <= 1 && Object.val
 const FRESH = {
   /** Map being played. */
   modeId: null,
+  /** Whose save this run uses: 'solo', or the team's id from the server. */
+  team: 'solo',
   difficulty: 'easy',
   /** Coins in this map's pool: bank them all to clear it. */
   goal: POOL_COINS,
@@ -103,6 +107,7 @@ export const useRun = create((set, get) => ({
       tools: [...FRESH.tools],
       net,
       modeId,
+      team: net?.state?.team || 'solo',
       difficulty,
       goal: mapById(modeId).coins,
       poolLeft: mapById(modeId).coins,
@@ -111,7 +116,7 @@ export const useRun = create((set, get) => ({
     const me = net?.state?.players?.get(net.sessionId)
     if (me) get().syncServer(me, net.state)
 
-    const saved = loadSnapshot(modeId)
+    const saved = loadSnapshot(modeId, get().team)
     if (!saved) return
     if (!net) {
       set({ bank: saved.bank, tools: saved.tools, equipped: saved.tool, levels: { ...FRESH.levels, ...saved.levels } })
@@ -241,7 +246,7 @@ export const useRun = create((set, get) => ({
     game.addCoins(result.coins)
     if (result.won) {
       game.markCleared(result.mapId || get().modeId)
-      storeSnapshot(result.mapId || get().modeId, null) // cleared: next time starts fresh
+      storeSnapshot(result.mapId || get().modeId, get().team, null) // cleared: next time starts fresh
     }
     set({ result, panel: null, banking: false })
   },
@@ -252,7 +257,7 @@ export const useRun = create((set, get) => ({
     if (s.startedAt && !s.result) {
       useGame.getState().addCoins(s.earned + s.bag)
       const data = snapshotOf(s, s.bank + s.bag)
-      if (!isEmptySnapshot(data)) storeSnapshot(s.modeId, data)
+      if (!isEmptySnapshot(data)) storeSnapshot(s.modeId, s.team, data)
     }
     set({ result: s.result || { left: true } })
   },
@@ -267,7 +272,7 @@ export const useRun = create((set, get) => ({
     game.addCoins(s.earned)
     if (won) {
       game.markCleared(s.modeId)
-      storeSnapshot(s.modeId, null)
+      storeSnapshot(s.modeId, s.team, null)
     }
     set({
       result: { mapId: s.modeId, cleared: s.cleared, goal: s.goal, seconds, coins: s.earned, won },
@@ -334,6 +339,6 @@ useRun.subscribe((s, prev) => {
     const r = useRun.getState()
     if (!r.startedAt || r.result || !r.modeId) return
     const data = snapshotOf(r)
-    if (!isEmptySnapshot(data)) storeSnapshot(r.modeId, data)
+    if (!isEmptySnapshot(data)) storeSnapshot(r.modeId, r.team, data)
   }, 1500)
 })

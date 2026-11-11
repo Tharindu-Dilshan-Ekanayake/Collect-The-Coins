@@ -142,6 +142,8 @@ export class StageState extends Schema {
     this.goblins = new ArraySchema()
     this.modeId = 'story'
     this.difficulty = 'easy'
+    /** Which team's save this run uses ('solo' or a hash). */
+    this.team = 'solo'
     this.goal = 0
     /** Coins banked by the whole party: the shared objective. */
     this.cleared = 0
@@ -156,6 +158,7 @@ defineTypes(StageState, {
   goblins: [GoblinState],
   modeId: 'string',
   difficulty: 'string',
+  team: 'string',
   goal: 'uint32',
   cleared: 'uint32',
   poolLeft: 'uint32',
